@@ -34,8 +34,13 @@ a re-scan.
   addresses match, so `make apply MODE=fixed` repairs the deployed lab in place
   and the plan diff reads as the fix list.
 - **`scripts/scan.sh`** — runs Prowler against the account and writes one CSV.
+  It passes `--scan-unused-services`, because Prowler otherwise skips a
+  security group that is attached to nothing, and `--ignore-exit-code-3`,
+  because Prowler exits 3 whenever a check fails.
 - **`scripts/assess.py`** — reads the before and after CSVs, asserts each
-  lab finding flipped from FAIL to PASS, and exits non-zero if any survived.
+  lab finding went from FAIL to PASS, and exits non-zero if any survived, if a
+  resource that passed before now fails, or if a new check fails that the
+  Limitations below do not accept.
 - **CI (GitHub Actions)** — runs without AWS credentials: `terraform validate`,
   unit tests for `assess.py`, and a Checkov pair that must flag the vuln module
   and pass the fixed one. That pair is the static before/after, re-run on every
@@ -57,7 +62,12 @@ make prove       # assert every lab finding flipped FAIL → PASS
 make destroy     # remove everything
 ```
 
-`make test` runs the `assess.py` unit tests without touching AWS.
+`make test` runs the unit tests for `assess.py` and `scan.sh` without touching
+AWS (`scan.sh` is tested against a stand-in `prowler`).
+
+`make after` must follow `make before`: the fixed module repairs the vuln
+state, and its first step (resetting the bucket ACL to private) fails on a
+bucket that never had ACLs enabled.
 
 ## What you'll see when it works
 
@@ -68,8 +78,12 @@ the remediation, it exits 1 and names the check that is still failing.
 ## Teardown
 
 `make destroy` deletes the bucket, the security group, the trail and its audit
-bucket, and restores the account-level settings. Nothing else is created, so
-nothing else needs removing. Destroy the same day you deploy: the lab is priced
+bucket. It also deletes the account-level public access block and the IAM
+password policy, which leaves both unset; it does not put back whatever the
+account had before the lab. Record both before `make before`
+(`aws s3control get-public-access-block --account-id <id>`,
+`aws iam get-account-password-policy`) and set them again after the destroy if
+they were set. Nothing else is created, so nothing else needs removing. Destroy the same day you deploy: the lab is priced
 at roughly zero only while nothing lingers.
 
 ## Design decisions
@@ -120,10 +134,17 @@ These are deliberate scope decisions, priced and accepted, not oversights:
   A CMK costs $1 per month; Checkov flags this as `CKV_AWS_145`/`CKV_AWS_35`
   and Prowler as `s3_bucket_kms_encryption`/`cloudtrail_kms_encryption_enabled`.
 - **CloudTrail ships to S3 only**: no CloudWatch Logs, no SNS, no Insights —
-  each adds ingestion or per-evaluation cost (`CKV2_AWS_10`, `CKV_AWS_252`).
+  each adds ingestion or per-evaluation cost (`CKV2_AWS_10`, `CKV_AWS_252`;
+  Prowler `cloudtrail_cloudwatch_logging_enabled`, `cloudtrail_insights_exist`).
 - **No S3 access logging, cross-region replication, lifecycle or event
   notifications** on the buckets (`CKV_AWS_18`, `CKV_AWS_144`, `CKV2_AWS_61`,
-  `CKV2_AWS_62`).
+  `CKV2_AWS_62`; Prowler `cloudtrail_logs_s3_bucket_access_logging_enabled`).
+- **MFA delete is off** on both buckets: only the root user with an MFA device
+  can turn it on, which a Terraform run cannot do (Prowler
+  `cloudtrail_bucket_requires_mfa_delete`).
+- The Prowler checks named above report only on a trail that exists, so they
+  first appear in the after scan. `assess.py` lists them as accepted instead
+  of failing the run; any other new failure still fails it.
 - **The security group is attached to nothing** (`CKV2_AWS_5`): the lab deploys
   no instances, so there is nothing to attach it to.
 - Root-account hygiene items are not touched by either module.

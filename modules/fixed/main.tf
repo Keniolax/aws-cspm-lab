@@ -1,8 +1,12 @@
 # The remediation of every misconfiguration in the vuln module, plus the two
 # CIS AWS Benchmark account-level items the vuln module left out on purpose:
 # a multi-region CloudTrail trail and a strong IAM password policy. Resource
-# addresses match the vuln module, so `terraform apply -var mode=fixed` updates
-# the same resources in place and the plan diff reads as the fix list.
+# addresses match the vuln module, so `make apply MODE=fixed` updates the same
+# resources in place and the plan diff reads as the fix list.
+#
+# This module is applied over the vuln state (`make before`, then
+# `make after`). On a fresh account the ACL reset below fails, because a new
+# bucket already has ACLs disabled.
 
 variable "region" {
   type = string
@@ -31,8 +35,9 @@ resource "aws_s3_bucket" "lab" {
   force_destroy = true
 }
 
-# Account-level public access block back on. AWS enables it by default on new
-# accounts; the vuln module disabled it, this restores the default.
+# Account-level public access block on. AWS turns Block Public Access on by
+# default for each new bucket, not for the account; the vuln module set the
+# account-level block to off, and this sets it to on.
 
 resource "aws_s3_account_public_access_block" "lab" {
   block_public_acls       = true
@@ -52,11 +57,24 @@ resource "aws_s3_bucket_public_access_block" "lab" {
   restrict_public_buckets = true
 }
 
+# The order of these two resources is the remediation. The vuln bucket has a
+# public-read ACL grant. Removing an aws_s3_bucket_acl resource from the code
+# does not change the bucket (the provider only forgets it), and S3 refuses to
+# switch a bucket to BucketOwnerEnforced while a grant to anyone outside the
+# account exists (InvalidBucketAclWithObjectOwnership). So the ACL is reset to
+# private first, and only then are ACLs disabled.
+
+resource "aws_s3_bucket_acl" "lab" {
+  bucket = aws_s3_bucket.lab.id
+  acl    = "private"
+}
+
 # BucketOwnerEnforced disables ACLs entirely, so a public-read ACL cannot be
 # attached again. The vuln module needed ObjectWriter for its public ACL.
 
 resource "aws_s3_bucket_ownership_controls" "lab" {
-  bucket = aws_s3_bucket.lab.id
+  depends_on = [aws_s3_bucket_acl.lab]
+  bucket     = aws_s3_bucket.lab.id
   rule {
     object_ownership = "BucketOwnerEnforced"
   }
@@ -113,12 +131,20 @@ resource "aws_s3_bucket_policy" "lab" {
   policy = data.aws_iam_policy_document.deny_insecure_transport.json
 }
 
-# --- EC2: the same security group, with no listener and no egress ---
+# --- EC2: the same security group, with no inbound and no outbound rules ---
+#
+# The description matches the vuln module: a changed description forces
+# Terraform to replace the group instead of repairing it. Leaving out the
+# ingress and egress blocks would not remove the old rules (Terraform stops
+# managing them), so both are set to empty lists.
 
 resource "aws_security_group" "lab" {
   name        = "${var.lab_name}-ssh"
-  description = "No inbound or outbound access"
+  description = "SecEng week 10 lab security group"
   vpc_id      = data.aws_vpc.default.id
+
+  ingress = []
+  egress  = []
 
   tags = {
     Name = "${var.lab_name}-ssh"
@@ -156,7 +182,40 @@ resource "aws_s3_bucket_versioning" "audit" {
   }
 }
 
+# The audit bucket is scanned too, so it meets the same bar as the lab bucket:
+# ACLs disabled and plain HTTP refused. CloudTrail delivers over HTTPS.
+
+resource "aws_s3_bucket_ownership_controls" "audit" {
+  bucket = aws_s3_bucket.audit.id
+  rule {
+    object_ownership = "BucketOwnerEnforced"
+  }
+}
+
 data "aws_iam_policy_document" "cloudtrail_audit" {
+  statement {
+    sid    = "DenyInsecureTransport"
+    effect = "Deny"
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    actions = ["s3:*"]
+
+    resources = [
+      aws_s3_bucket.audit.arn,
+      "${aws_s3_bucket.audit.arn}/*",
+    ]
+
+    condition {
+      test     = "Bool"
+      variable = "aws:SecureTransport"
+      values   = ["false"]
+    }
+  }
+
   statement {
     sid    = "CloudTrailAclCheck"
     effect = "Allow"

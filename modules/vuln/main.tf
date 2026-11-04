@@ -73,7 +73,7 @@ resource "aws_s3_bucket_versioning" "lab" {
 
 resource "aws_security_group" "lab" {
   name        = "${var.lab_name}-ssh"
-  description = "Deliberately open: SSH from 0.0.0.0/0"
+  description = "SecEng week 10 lab security group"
   vpc_id      = data.aws_vpc.default.id
 
   ingress {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run Prowler against the lab account and normalize its CSV output to
-# <outdir>/prowler.csv, so assess.py always reads the same file name.
+# Run Prowler against the lab account and copy its findings CSV to
+# <outdir>/prowler.csv, the one file assess.py reads.
 # usage: scripts/scan.sh <vuln|fixed> <output-directory>
 set -euo pipefail
 
@@ -16,11 +16,27 @@ if ! command -v prowler >/dev/null 2>&1; then
 fi
 
 mkdir -p "$outdir/raw"
-prowler aws --region "$region" --output-modes csv --output-directory "$outdir/raw"
 
-csv=$(find "$outdir/raw" -name '*.csv' -type f | head -1)
-if [ -z "$csv" ]; then
-  echo "scan.sh: no prowler csv found under $outdir/raw" >&2
+# --ignore-exit-code-3: Prowler exits 3 when any check fails. The before scan
+#   fails on purpose, so without this flag `set -e` stops the script here and
+#   the CSV is never copied. Other exit codes (real errors) still stop it.
+# --scan-unused-services: Prowler skips security groups that are attached to
+#   nothing. The lab's open-SSH group is attached to nothing, so without this
+#   flag the misconfiguration is never reported.
+# --output-filename: a fixed name, so the findings CSV is found by name and
+#   never confused with the per-framework CSVs Prowler writes to raw/compliance/.
+prowler aws \
+  --region "$region" \
+  --output-formats csv \
+  --output-directory "$outdir/raw" \
+  --output-filename prowler \
+  --scan-unused-services \
+  --ignore-exit-code-3 \
+  --no-banner
+
+csv="$outdir/raw/prowler.csv"
+if [ ! -s "$csv" ]; then
+  echo "scan.sh: $csv is missing or empty" >&2
   exit 1
 fi
 cp "$csv" "$outdir/prowler.csv"

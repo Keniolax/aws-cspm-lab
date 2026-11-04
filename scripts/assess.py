@@ -3,58 +3,73 @@
 
 usage: python3 scripts/assess.py evidence/before evidence/after
 
-Reads prowler.csv from each directory (Prowler 5.x CSV, `;` delimiter).
-The account is the lab's throwaway account, so every resource in it belongs
-to the lab and check IDs are matched over the whole account.
+Reads prowler.csv from each directory (Prowler 5.x CSV, `;` delimiter). The
+account is the lab's throwaway account, so check IDs are matched over the
+whole account and findings are matched by check ID and resource.
 
-For every tracked check, requires:
-  * at least one FAIL row in the before scan (the deliberate misconfiguration
-    was actually detected), and
-  * zero FAIL rows in the after scan (the scanner, not a write-up, says it is
-    fixed).
+Each tracked check has a kind:
+  * "flip": the misconfigured resource exists in both scans. The before scan
+    must report FAIL; the after scan must report PASS and no FAIL.
+  * "added": the fixed module creates the resource (the CloudTrail trail), so
+    Prowler has nothing to report on before. The before scan must not already
+    PASS; the after scan must report PASS and no FAIL.
 
-Also refuses regressions: any check that passed in the before scan and fails
-in the after scan is reported and fails the run, tracked or not.
+Outside the tracked checks, the run also fails on:
+  * a regression: a resource that passed a check before and fails it after;
+  * a new failure: a check with no FAIL before and a FAIL after, unless the
+    check is in ACCEPTED (the README's limitations, accepted on cost).
 
-Exits 0 only when every tracked check flipped FAIL -> PASS and nothing
-regressed. Otherwise exits 1 with a per-check report.
+Exits 0 only when every tracked check is cleared and nothing else got worse.
+Otherwise exits 1 and names each problem.
 """
 import csv
 import sys
 from pathlib import Path
 
-# Prowler check IDs the lab's misconfigurations map to. Every one must flip
-# from FAIL to PASS between the two scans.
-TRACKED_CHECKS = [
+# Prowler check IDs the lab's misconfigurations map to.
+TRACKED_CHECKS = {
     # S3 bucket and account public-access posture
-    "s3_bucket_public_access",
-    "s3_bucket_public_list_acl",
-    "s3_bucket_level_public_access_block",
-    "s3_account_level_public_access_blocks",
-    "s3_bucket_acl_prohibited",
-    "s3_bucket_object_versioning",
-    "s3_bucket_secure_transport_policy",
-    # EC2 security group
-    "ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_22",
+    "s3_bucket_public_access": "flip",
+    "s3_bucket_public_list_acl": "flip",
+    "s3_bucket_level_public_access_block": "flip",
+    "s3_account_level_public_access_blocks": "flip",
+    "s3_bucket_acl_prohibited": "flip",
+    "s3_bucket_object_versioning": "flip",
+    "s3_bucket_secure_transport_policy": "flip",
+    # EC2 security group (reported only with --scan-unused-services)
+    "ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_22": "flip",
     # IAM password policy
-    "iam_password_policy_minimum_length_14",
-    "iam_password_policy_lowercase",
-    "iam_password_policy_uppercase",
-    "iam_password_policy_number",
-    "iam_password_policy_symbol",
-    "iam_password_policy_reuse_24",
-    "iam_password_policy_expires_passwords_within_90_days_or_less",
-    # CloudTrail (absent in vuln, added by fixed)
-    "cloudtrail_multi_region_enabled",
-    "cloudtrail_multi_region_enabled_logging_management_events",
-    "cloudtrail_log_file_validation_enabled",
-]
+    "iam_password_policy_minimum_length_14": "flip",
+    "iam_password_policy_lowercase": "flip",
+    "iam_password_policy_uppercase": "flip",
+    "iam_password_policy_number": "flip",
+    "iam_password_policy_symbol": "flip",
+    "iam_password_policy_reuse_24": "flip",
+    "iam_password_policy_expires_passwords_within_90_days_or_less": "flip",
+    # CloudTrail. With no trail, these two report one FAIL per region...
+    "cloudtrail_multi_region_enabled": "flip",
+    "cloudtrail_multi_region_enabled_logging_management_events": "flip",
+    # ...but this one reports only on trails that exist, so it is "added".
+    "cloudtrail_log_file_validation_enabled": "added",
+}
 
-REQUIRED_COLUMNS = ["CHECK_ID", "STATUS"]
+# Checks that report only on a trail that exists, so they first appear in the
+# after scan, and that fail there because of a limitation the README accepts.
+ACCEPTED = {
+    "cloudtrail_kms_encryption_enabled": "no KMS customer-managed key",
+    "cloudtrail_cloudwatch_logging_enabled": "trail ships to S3 only, no CloudWatch Logs",
+    "cloudtrail_insights_exist": "no CloudTrail Insights",
+    "cloudtrail_bucket_requires_mfa_delete": "MFA delete needs the root user",
+    "cloudtrail_logs_s3_bucket_access_logging_enabled": "no S3 access logging",
+}
+
+REQUIRED_COLUMNS = ["CHECK_ID", "STATUS", "RESOURCE_UID"]
+
+Scan = dict[str, dict[str, set[str]]]  # check_id -> resource_uid -> statuses
 
 
-def load_statuses(scan_dir: Path) -> dict[str, set[str]]:
-    """Read <scan_dir>/prowler.csv and return {check_id: {statuses}}."""
+def load_scan(scan_dir: Path) -> Scan:
+    """Read <scan_dir>/prowler.csv into {check_id: {resource_uid: {statuses}}}."""
     csv_path = scan_dir / "prowler.csv"
     if not csv_path.is_file():
         sys.exit(f"assess.py: {csv_path} not found")
@@ -64,52 +79,73 @@ def load_statuses(scan_dir: Path) -> dict[str, set[str]]:
         if missing:
             sys.exit(
                 f"assess.py: {csv_path} is missing columns {missing}; "
-                "is this a Prowler 5.x CSV?"
+                "is this a Prowler 5.x findings CSV?"
             )
-        statuses: dict[str, set[str]] = {}
+        scan: Scan = {}
         for row in reader:
             check_id = (row["CHECK_ID"] or "").strip()
             status = (row["STATUS"] or "").strip().upper()
+            resource = (row["RESOURCE_UID"] or "").strip()
             if check_id and status:
-                statuses.setdefault(check_id, set()).add(status)
-        return statuses
+                scan.setdefault(check_id, {}).setdefault(resource, set()).add(status)
+        return scan
+
+
+def statuses(scan: Scan, check: str) -> set[str]:
+    """Every status a check reported, over all resources."""
+    found: set[str] = set()
+    for per_resource in scan.get(check, {}).values():
+        found |= per_resource
+    return found
 
 
 def main(argv: list[str]) -> int:
     if len(argv) != 3:
         print(__doc__)
         return 2
-    before = load_statuses(Path(argv[1]))
-    after = load_statuses(Path(argv[2]))
+    before = load_scan(Path(argv[1]))
+    after = load_scan(Path(argv[2]))
 
     failures = []
-    print(f"{'check id':64} {'before':12} after")
-    for check in TRACKED_CHECKS:
-        b = before.get(check, set())
-        a = after.get(check, set())
-        detected = "FAIL" in b
-        cleared = bool(a) and "FAIL" not in a and "PASS" in a
-        print(f"{check:64} {','.join(sorted(b)) or '-':12} {','.join(sorted(a)) or '-'}")
-        if not detected:
+    print(f"{'check id':64} {'kind':6} {'before':12} after")
+    for check, kind in TRACKED_CHECKS.items():
+        b = statuses(before, check)
+        a = statuses(after, check)
+        print(f"{check:64} {kind:6} {','.join(sorted(b)) or '-':12} {','.join(sorted(a)) or '-'}")
+        if kind == "flip" and "FAIL" not in b:
             failures.append(f"{check}: not detected as FAIL in the before scan")
-        elif not cleared:
+        elif kind == "added" and "PASS" in b:
+            failures.append(f"{check}: already passing before, so the fix proves nothing")
+        elif "FAIL" in a or "PASS" not in a:
             failures.append(f"{check}: still failing (or absent) in the after scan")
 
-    for check, a in after.items():
+    accepted = []
+    for check, resources in after.items():
+        if check in TRACKED_CHECKS:
+            continue
+        a = statuses(after, check)
         if "FAIL" not in a:
             continue
-        b = before.get(check, set())
-        if not b:
-            failures.append(f"{check}: new failure — not present before, fails after")
-        elif "PASS" in b and "FAIL" not in b:
-            failures.append(f"{check}: regressed — passed before, fails after")
+        for resource, a_res in resources.items():
+            b_res = before.get(check, {}).get(resource, set())
+            if "FAIL" in a_res and "PASS" in b_res and "FAIL" not in b_res:
+                failures.append(f"{check}: regressed on {resource} (passed before, fails after)")
+        if "FAIL" not in statuses(before, check):
+            if check in ACCEPTED:
+                accepted.append(f"{check}: {ACCEPTED[check]}")
+            else:
+                failures.append(f"{check}: new failure (no FAIL before, fails after)")
 
+    if accepted:
+        print("\nAccepted new failures (README limitations):")
+        for line in accepted:
+            print(f"  {line}")
     if failures:
         print("\nFAILED:")
-        for f in failures:
-            print(f"  {f}")
+        for line in failures:
+            print(f"  {line}")
         return 1
-    print(f"\nOK: {len(TRACKED_CHECKS)} tracked checks flipped FAIL -> PASS, no regressions.")
+    print(f"\nOK: {len(TRACKED_CHECKS)} tracked checks cleared, nothing regressed.")
     return 0
 
 

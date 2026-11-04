@@ -1,0 +1,16 @@
+# Terraform state and secrets never enter git.
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+.env
+credentials
+
+# Scanner output we do not ship: HTML reports and raw timestamped trees.
+evidence/prowler/
+evidence/scoutsuite/
+scoutsuite-report/
+
+__pycache__/
+.pytest_cache/

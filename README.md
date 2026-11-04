@@ -41,6 +41,13 @@ a re-scan.
   lab finding went from FAIL to PASS, and exits non-zero if any survived, if a
   resource that passed before now fails, or if a new check fails that the
   Limitations below do not accept.
+- **`scripts/config.sh`** — runs AWS Config as a second check: it records the
+  lab's resource types, creates five managed rules matched to the lab's
+  findings, captures their compliance, then deletes the rules, the recorder, the
+  delivery channel and its bucket in the same run. Config bills per recorded
+  item and per evaluation, so it never stays on.
+- **`scripts/scoutsuite.sh`** — runs ScoutSuite as a third opinion. Its HTML
+  report is generated output and is not committed.
 - **CI (GitHub Actions)** — runs without AWS credentials: `terraform validate`,
   unit tests for `assess.py`, and a Checkov pair that must flag the vuln module
   and pass the fixed one. That pair is the static before/after, re-run on every
@@ -64,6 +71,15 @@ make destroy     # remove everything
 
 `make test` runs the unit tests for `assess.py` and `scan.sh` without touching
 AWS (`scan.sh` is tested against a stand-in `prowler`).
+
+Prowler is the graded scanner the before/after proof is built on. AWS Config and
+ScoutSuite are second opinions, run by hand against each state while it is
+deployed:
+
+```
+scripts/config.sh setup <account-id> us-east-1   # then: evaluate, capture, teardown
+scripts/scoutsuite.sh <vuln|fixed> evidence/scoutsuite/<mode>
+```
 
 `make after` must follow `make before`: the fixed module repairs the vuln
 state, and its first step (resetting the bucket ACL to private) fails on a
@@ -148,8 +164,9 @@ These are deliberate scope decisions, priced and accepted, not oversights:
 - **The security group is attached to nothing** (`CKV2_AWS_5`): the lab deploys
   no instances, so there is nothing to attach it to.
 - Root-account hygiene items are not touched by either module.
-- Prowler is the graded scanner; ScoutSuite runs once for a second opinion and
-  its HTML report is not committed (it is generated output).
+- Prowler is the graded scanner. AWS Config and ScoutSuite run once each for a
+  second opinion; Config is torn down in the same session and ScoutSuite's HTML
+  report is not committed (both are generated output).
 - The lab exercises S3, EC2 security groups and IAM account settings. Findings
   that need other services (EBS, RDS, Lambda) are out of scope.
 
@@ -163,6 +180,20 @@ These are deliberate scope decisions, priced and accepted, not oversights:
 
 ## What was learned
 
-Written into the report once the scans have run: which findings the scanners
-caught, which they disagreed on, and what the remediation actually cost in
-plan diff.
+The full before/after is in [docs/report.md](docs/report.md). In short:
+
+- All 18 tracked Prowler checks flipped FAIL → PASS, all 5 AWS Config rules went
+  NON_COMPLIANT → COMPLIANT, and ScoutSuite showed every lab misconfiguration
+  cleared. The scanners agree on the lab's deliberate mistakes.
+- A CSPM scanner's verdict depends on how it is configured. AWS Config's
+  `IAM_PASSWORD_POLICY` rule with no parameters called a 6-character policy
+  compliant, because it only checks that a policy exists; it has to be told the
+  CIS thresholds. Prowler bakes them in.
+- Config scans its own plumbing and is eventually consistent: its delivery
+  bucket showed up as a finding until hardened, and its rules read the last
+  recorded state, so they can lag a fresh remediation. Prowler reads the live
+  API and does not.
+- The three tools disagree mostly on noise: ScoutSuite reports account-wide
+  hygiene (default SG, root use, EBS encryption) that the lab does not set out
+  to fix. The one place all three agree and the lab accepts is the unused
+  security group — it has no rules but is attached to nothing.

@@ -1,0 +1,36 @@
+=== TEARDOWN verification, account 198811874138, region us-east-1 ===
+Recorded: 2026-11-04T18:25:47Z
+
+=== S3 buckets (expect none) ===
+
+=== CloudTrail trails (expect none) ===
+[]
+
+=== Security groups in us-east-1 (expect only default) ===
+[
+    {
+        "Id": "sg-088396e47cea2d6cd",
+        "Name": "default"
+    }
+]
+
+=== Account public access block (expect NoSuchPublicAccessBlockConfiguration = unset, as baseline) ===
+
+An error occurred (NoSuchPublicAccessBlockConfiguration) when calling the GetPublicAccessBlock operation: The public access block configuration was not found
+
+=== IAM password policy (expect NoSuchEntity = unset, as baseline) ===
+
+An error occurred (NoSuchEntity) when calling the GetAccountPasswordPolicy operation: The Password Policy with domain name 198811874138 cannot be found.
+
+=== AWS Config recorders (expect none) ===
+{
+    "ConfigurationRecorders": []
+}
+
+=== AWS Config delivery channels (expect none) ===
+{
+    "DeliveryChannels": []
+}
+
+=== AWS Config rules (expect none of the lab's) ===
+[]

@@ -45,8 +45,17 @@ setup() {
     aws s3api create-bucket --bucket "$bucket" --region "$reg" >/dev/null 2>&1 || true
   aws s3api put-bucket-tagging --bucket "$bucket" \
     --tagging 'TagSet=[{Key=lab,Value=seceng-bootcamp-week-10}]' >/dev/null 2>&1 || true
+  # Block public access on the delivery bucket itself, so it does not become a
+  # finding while Config is scanning S3.
+  aws s3api put-public-access-block --bucket "$bucket" \
+    --public-access-block-configuration \
+    BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true \
+    >/dev/null 2>&1 || true
 
-  # Config must be allowed to check the bucket ACL and write objects.
+  # Config must be allowed to check the bucket ACL and write objects. The
+  # DenyInsecureTransport statement keeps the delivery bucket itself compliant
+  # with the S3_BUCKET_SSL_REQUESTS_ONLY rule, so Config's own infrastructure
+  # does not read as a finding.
   local policy
   policy=$(cat <<JSON
 {
@@ -60,7 +69,11 @@ setup() {
      "Principal":{"Service":"config.amazonaws.com"},
      "Action":"s3:PutObject",
      "Resource":"arn:aws:s3:::${bucket}/AWSLogs/${acct}/Config/*",
-     "Condition":{"StringEquals":{"s3:x-amz-acl":"bucket-owner-full-control"}}}
+     "Condition":{"StringEquals":{"s3:x-amz-acl":"bucket-owner-full-control"}}},
+    {"Sid":"DenyInsecureTransport","Effect":"Deny","Principal":"*",
+     "Action":"s3:*",
+     "Resource":["arn:aws:s3:::${bucket}","arn:aws:s3:::${bucket}/*"],
+     "Condition":{"Bool":{"aws:SecureTransport":"false"}}}
   ]
 }
 JSON

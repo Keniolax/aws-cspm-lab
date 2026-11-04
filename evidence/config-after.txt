@@ -1,0 +1,6 @@
+=== AWS Config rule compliance, 2026-11-04T18:21:25Z ===
+seceng-iam-password-policy                    IAM_PASSWORD_POLICY                 COMPLIANT
+seceng-restricted-ssh                         INCOMING_SSH_DISABLED               COMPLIANT
+seceng-cloudtrail-enabled                     CLOUD_TRAIL_ENABLED                 COMPLIANT
+seceng-s3-bucket-public-read-prohibited       S3_BUCKET_PUBLIC_READ_PROHIBITED    COMPLIANT
+seceng-s3-bucket-ssl-requests-only            S3_BUCKET_SSL_REQUESTS_ONLY         COMPLIANT

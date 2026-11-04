@@ -11,6 +11,7 @@ init:
 
 apply:
 	cp modes/$(MODE).tf main.tf
+	terraform init -input=false
 	terraform apply -auto-approve
 
 destroy:

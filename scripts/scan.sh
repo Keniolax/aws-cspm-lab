@@ -39,5 +39,10 @@ if [ ! -s "$csv" ]; then
   echo "scan.sh: $csv is missing or empty" >&2
   exit 1
 fi
-cp "$csv" "$outdir/prowler.csv"
+# Redact AWS access key IDs (AKIA.../ASIA...) from the committed CSV. They are
+# public identifiers, not secret keys (Prowler never emits a secret key), but
+# they identify a live key and this repo goes public, so only the raw copy
+# under raw/ (git-ignored) keeps them. The redaction is deterministic, so the
+# before and after CSVs stay comparable for assess.py.
+sed -E 's/(AKIA|ASIA)[0-9A-Z]{16}/<redacted-access-key-id>/g' "$csv" > "$outdir/prowler.csv"
 echo "scan.sh: wrote $outdir/prowler.csv ($mode scan)"

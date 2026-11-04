@@ -1,0 +1,34 @@
+=== BASELINE for account 198811874138, region us-east-1 ===
+Recorded: 2026-11-04T17:39:59Z
+
+=== S3 buckets ===
+
+=== CloudTrail trails (all regions) ===
+[]
+
+=== Security groups in us-east-1 ===
+[
+    {
+        "Id": "sg-088396e47cea2d6cd",
+        "Name": "default",
+        "Vpc": "vpc-044073e8fbf68fdc3"
+    }
+]
+
+=== Account-level S3 public access block ===
+
+An error occurred (NoSuchPublicAccessBlockConfiguration) when calling the GetPublicAccessBlock operation: The public access block configuration was not found
+
+=== IAM account password policy ===
+
+An error occurred (NoSuchEntity) when calling the GetAccountPasswordPolicy operation: The Password Policy with domain name 198811874138 cannot be found.
+
+=== AWS Config recorders (us-east-1) ===
+{
+    "ConfigurationRecorders": []
+}
+
+=== AWS Config delivery channels (us-east-1) ===
+{
+    "DeliveryChannels": []
+}

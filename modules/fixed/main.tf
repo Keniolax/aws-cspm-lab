@@ -149,6 +149,13 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "audit" {
   }
 }
 
+resource "aws_s3_bucket_versioning" "audit" {
+  bucket = aws_s3_bucket.audit.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
 data "aws_iam_policy_document" "cloudtrail_audit" {
   statement {
     sid    = "CloudTrailAclCheck"

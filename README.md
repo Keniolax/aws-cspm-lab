@@ -43,10 +43,11 @@ a re-scan.
 
 ## How to run it
 
-Prerequisites, exactly: Terraform ≥ 1.5 (built on 1.14.1), `pipx` with Prowler
-and Checkov installed, Python ≥ 3.11 with `pytest`, and AWS credentials for a
-throwaway account (AdministratorAccess or broad read plus the remediation
-writes; region `us-east-1` by default).
+Prerequisites, exactly: Terraform ≥ 1.5 (built on 1.14.1), Python ≥ 3.11 with
+`pytest`, `pipx` with Prowler 5.47.0 and Checkov 3.4.3 installed (the versions
+the lab was built against; the CSV layout is the contract `assess.py` depends
+on), and AWS credentials for a throwaway account (AdministratorAccess or broad
+read plus the remediation writes; region `us-east-1` by default).
 
 ```
 make init        # download the AWS provider
@@ -112,11 +113,21 @@ check IDs.
 
 ## Limitations
 
-- The fixed module leaves CIS AWS Benchmark items open on purpose: GuardDuty
-  (paid after its trial), a KMS CMK for CloudTrail/S3 ($1/month), CloudTrail's
-  CloudWatch and SNS delivery (ingestion cost), and root-account hygiene items
-  the lab does not touch.
-- Prowler is the graded scanner; ScoutSuite is run once for a second opinion and
+These are deliberate scope decisions, priced and accepted, not oversights:
+
+- **GuardDuty stays off** (paid hourly after its 30-day trial).
+- **No KMS customer-managed key**: S3 and CloudTrail use AWS-managed AES256.
+  A CMK costs $1 per month; Checkov flags this as `CKV_AWS_145`/`CKV_AWS_35`
+  and Prowler as `s3_bucket_kms_encryption`/`cloudtrail_kms_encryption_enabled`.
+- **CloudTrail ships to S3 only**: no CloudWatch Logs, no SNS, no Insights —
+  each adds ingestion or per-evaluation cost (`CKV2_AWS_10`, `CKV_AWS_252`).
+- **No S3 access logging, cross-region replication, lifecycle or event
+  notifications** on the buckets (`CKV_AWS_18`, `CKV_AWS_144`, `CKV2_AWS_61`,
+  `CKV2_AWS_62`).
+- **The security group is attached to nothing** (`CKV2_AWS_5`): the lab deploys
+  no instances, so there is nothing to attach it to.
+- Root-account hygiene items are not touched by either module.
+- Prowler is the graded scanner; ScoutSuite runs once for a second opinion and
   its HTML report is not committed (it is generated output).
 - The lab exercises S3, EC2 security groups and IAM account settings. Findings
   that need other services (EBS, RDS, Lambda) are out of scope.

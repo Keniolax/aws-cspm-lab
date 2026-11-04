@@ -270,6 +270,13 @@ resource "aws_cloudtrail" "lab" {
   include_global_service_events = true
   is_multi_region_trail         = true
   enable_log_file_validation    = true
+
+  # Stated outright rather than left to the default, because the tracked
+  # check cloudtrail_multi_region_enabled_logging_management_events reads it.
+  event_selector {
+    read_write_type           = "All"
+    include_management_events = true
+  }
 }
 
 # --- IAM: the password policy the CIS AWS Benchmark asks for ---

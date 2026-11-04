@@ -23,11 +23,11 @@ a re-scan.
 
 ## What you built
 
-- **`modules/vuln`** — six deliberate misconfigurations across S3, EC2 and
-  IAM: a public-read bucket with no public access block, no encryption, no
-  HTTPS-only policy and versioning off; an account-level public access block
-  switched off; a security group with SSH open to the internet; and the weakest
-  password policy the API accepts.
+- **`modules/vuln`** — deliberate misconfigurations across S3, EC2 and IAM: a
+  public-read bucket with its own public access block switched off, no
+  encryption setting of its own, no HTTPS-only policy and versioning off; an
+  account-level public access block switched off; a security group with SSH
+  open to the internet; and the weakest password policy the API accepts.
 - **`modules/fixed`** — the same resource addresses, remediated, plus the two
   account-level items CIS asks for that the vulnerable state lacked: a
   multi-region CloudTrail trail and a strong IAM password policy. Resource

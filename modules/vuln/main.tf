@@ -27,11 +27,21 @@ resource "aws_s3_bucket" "lab" {
   force_destroy = true
 }
 
-# The public-read ACL below needs both the account-level public access block
-# off and object ownership set to ObjectWriter, so all three are flipped here.
-# Every one of these is itself a posture finding, which is the point.
+# The public-read ACL below needs the account-level and the bucket-level public
+# access blocks off and object ownership set to ObjectWriter. Since April 2023
+# AWS creates every new bucket with its public access block on and ACLs
+# disabled, so all of these are switched here. Each one is itself a posture
+# finding, which is the point.
 
 resource "aws_s3_account_public_access_block" "lab" {
+  block_public_acls       = false
+  ignore_public_acls      = false
+  block_public_policy     = false
+  restrict_public_buckets = false
+}
+
+resource "aws_s3_bucket_public_access_block" "lab" {
+  bucket                  = aws_s3_bucket.lab.id
   block_public_acls       = false
   ignore_public_acls      = false
   block_public_policy     = false
@@ -48,17 +58,16 @@ resource "aws_s3_bucket_ownership_controls" "lab" {
 resource "aws_s3_bucket_acl" "lab" {
   depends_on = [
     aws_s3_account_public_access_block.lab,
+    aws_s3_bucket_public_access_block.lab,
     aws_s3_bucket_ownership_controls.lab,
   ]
   bucket = aws_s3_bucket.lab.id
   acl    = "public-read"
 }
 
-# No aws_s3_bucket_public_access_block resource: per-bucket public access
-# block is absent.
-#
-# No aws_s3_bucket_server_side_encryption_configuration resource: objects
-# land unencrypted.
+# No aws_s3_bucket_server_side_encryption_configuration resource: the bucket
+# sets no encryption of its own. S3 still encrypts new objects with SSE-S3 by
+# default (since January 2023), so Prowler does not flag this one.
 #
 # No aws_s3_bucket_policy resource: requests over plain HTTP are accepted.
 
